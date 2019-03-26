@@ -17,7 +17,6 @@ from keras.callbacks import EarlyStopping
 from arff2pandas import a2p
 from sklearn import preprocessing
 from pandas import DataFrame
-import pandas as pd
 from keras.callbacks import Callback
 
 
@@ -56,7 +55,7 @@ class NormalizeFeatures():
         self._normalized_df = DataFrame()
         self._norms_df = DataFrame()
         for col in self._features:
-            normalized_vector, vector_min, vector_max = self.normalize(pd.to_numeric(self._df[col], errors='raise'))
+            normalized_vector, vector_min, vector_max = self.normalize(self._df[col])
             self._normalized_df.insert(loc=len(self._normalized_df.columns), column=col, value=normalized_vector)
             self._norms_df.insert(loc=len(self._norms_df.columns), column=col, value=(vector_min, vector_max))
             self._norms_df.rename(index={0: 'feature_min', 1: 'feaure_max'}, inplace=True)
@@ -147,58 +146,52 @@ class TerminateOnBaseline(Callback):
                 self.model.stop_training = True
 
 
-class AnnEcg200():
-    def __init__(self, train_db_file, test_db_file):
+class ConvPrECG():
+    def __init__(self, train_db_folder, test_db_folder):
         self.train_df = None
         self.test_df = None
-        self.train_db_file = train_db_file
-        self.test_db_file = test_db_file
+        self.train_db_folder = train_db_folder
+        self.test_db_folder = test_db_folder
         self.im_train_df = None
         self.im_test_df = None
         self.normalized_train_df = None
         self.norms_df = None
 
     def create_dataframes(self):
-        with open(self.train_db_file) as f:
+        test_path = PurePath(os.getcwd(), 'ECG200', 'ECG200_TEST.arff')
+
+        with open(test_path) as f:
             self.test_df = a2p.load(f)
             # print(self.test_df)
 
-        with open(self.train_db_file) as f:
+        train_path = PurePath(os.getcwd(), 'ECG200', 'ECG200_TRAIN.arff')
+        with open(train_path) as f:
             self.train_df = a2p.load(f)
             # print(self.train_df)
 
-    def normalize_test_dataframe(self):
+    def normalize_dataframe(self):
         norm_inst = NormalizeFeatures(self.train_df, self.train_df.columns)
         norm_inst.normalize_dataframe()
         self.normalized_train_df = norm_inst.get_normalized_df()
         self.norms_df = norm_inst.get_norms_df()
-        # print(self.normalized_train_df)
-        # print(self.norms_df)
+        print(self.normalized_train_df)
+        print(self.norms_df)
 
-    def prepare_train_data(self):
-        train_x = []
-        print(self.normalized_train_df.iloc[:,-1])
-        train_y = self.normalized_train_df[self.normalized_train_df[-1]].to_list()
-        # fetuature_df = self.self.normalized_train_df.drop(labels=)
-        for index, row in self.train_df.iterrows():
-            print(row.to_list())
-            # train_x.append(row)
-            # train_y = 
 
     @staticmethod
-    def train_model(train_x, train_y, epochs_to_train):
+    def train_model(train_df, epochs_to_train):
         # overfitCallback = EarlyStopping(monitor='acc', min_delta=0.00001, mode='min', baseline=0.99, patience=3)
         overfitCallback = TerminateOnBaseline(monitor='acc', baseline=0.99)
-        train_samle_length = len(train_x[0])
+        train_samle_length = len(tran_df['x'][0])
         model_fft_input = Input(shape=(train_samle_length,))
         model_fft_dense_1 = Dense(72, activation='relu')(model_fft_input)
         model_fft_dense_2 = Dense(36, activation='relu')(model_fft_dense_1)
-        predict_out = Dense(1, activation='softmax')(model_fft_dense_2)
+        predict_out = Dense(len(labels_list), activation='softmax')(model_fft_dense_2)
         model_fft = Model(inputs=model_fft_input, outputs=predict_out)
         model_fft.compile(optimizer=tf.train.AdamOptimizer(),
                           loss='sparse_categorical_crossentropy',
                           metrics=['accuracy'])
-        history = model_fft.fit(train_x, train_y, epochs=epochs_to_train, callbacks=[overfitCallback])
+        history = model_fft.fit(x_train, y_train, epochs=epochs_to_train, callbacks=[overfitCallback])
         # print(history.history)
         return history, model_fft
 
@@ -214,23 +207,29 @@ class AnnEcg200():
         scores = model.evaluate(x, y, verbose=1)
         print("%s: %.2f%%" % (model.metrics_names[1], scores[1] * 100))
 
+class TerminateOnBaseline(Callback):
+    """Callback that terminates training when either acc or val_acc reaches a specified baseline
+    """
+
+    def __init__(self, monitor='acc', baseline=0.9):
+        super(TerminateOnBaseline, self).__init__()
+        self.monitor = monitor
+        self.baseline = baseline
+
+    def on_epoch_end(self, epoch, logs=None):
+        logs = logs or {}
+        acc = logs.get(self.monitor)
+        if acc is not None:
+            if acc >= self.baseline:
+                print('Epoch %d: Reached baseline, terminating training' % (epoch))
+                self.model.stop_training = True
 
 if __name__ == "__main__":
-    train_filepath = PurePath(os.getcwd(), 'ECG200', 'ECG200_TRAIN.arff')
-    test_filepath = PurePath(os.getcwd(), 'ECG200', 'ECG200_TEST.arff')
-    test_db_folder_name = PurePath(os.getcwd(), 'ecg200_images', 'test')
-    ann_inst = AnnEcg200(train_filepath, test_filepath)
-    ann_inst.create_dataframes()
-    ann_inst.normalize_test_dataframe()
-    ann_inst.prepare_train_data()
-
-    '''
     train_db_folder_name = PurePath(os.getcwd(), 'ecg200_images', 'train')
     test_db_folder_name = PurePath(os.getcwd(), 'ecg200_images', 'test')
     inst = ConvPrECG(train_db_folder_name, test_db_folder_name)
     inst.create_dataframes()
     inst.normalize_train_dataframe()
-    '''
     '''
     data = {'weigth': [1, 2, 0, 0, 0, 0, 1],
             'Age': [20, 21, 19, 18, 1, 2, 102]}

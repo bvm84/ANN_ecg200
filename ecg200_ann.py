@@ -52,16 +52,16 @@ class NormalizeFeatures():
             raise Exception(ZeroDivisionError)
         return normalized_vector, vector_min, vector_max
 
-    def normalize_dataframe(self):
+    def normalize_train_dataframe(self):
         self._normalized_df = DataFrame()
         self._norms_df = DataFrame()
         for col in self._features:
             normalized_vector, vector_min, vector_max = self.normalize(pd.to_numeric(self._df[col], errors='raise'))
             self._normalized_df.insert(loc=len(self._normalized_df.columns), column=col, value=normalized_vector)
             self._norms_df.insert(loc=len(self._norms_df.columns), column=col, value=(vector_min, vector_max))
-            self._norms_df.rename(index={0: 'feature_min', 1: 'feaure_max'}, inplace=True)
+            self._norms_df.rename(index={0: 'feature_min', 1: 'feature_max'}, inplace=True)
 
-    def get_normalized_df(self):
+    def get_normalized_train_df(self):
         if self._normalized_df.empty is False:
             return self._normalized_df
         else:
@@ -75,6 +75,28 @@ class NormalizeFeatures():
 
     def load_norms_df(self, norm_df):
         self._norms_df = norm_df
+
+    def normalize_test_series(self, test_series):
+        # numeraized_test.series = pd.to_numeric(self._df[col], errors='raise')
+        normalized_vector_list = []
+        for ind in test_series.index:
+            # print(type(test_series[ind]))
+            # print(type(self._norms_df[ind]['feature_min']))
+            delta = self._norms_df[ind]['feature_max'] - self._norms_df[ind]['feature_min']
+            normalized_value = (float(test_series[ind]) - self._norms_df[ind]['feature_min']) / delta
+            normalized_vector_list.append(normalized_value)
+        normalized_test_series = Series(data=normalized_vector_list, index=test_series.index)
+        return normalized_test_series
+
+    def normalize_test_dataframe(self, test_df):
+        normalized_test_df = DataFrame()
+        for index, row in test_df.iterrows():
+            # print(row.index)
+            normalized_series = self.normalize_test_series(row)
+            # print(normalized_series)
+            normalized_test_df = normalized_test_df.append(normalized_series, ignore_index=True)
+        # print(normalized_test_df)
+        return normalized_test_df
 
 
 class StandardizeFeatures():
@@ -133,7 +155,7 @@ class TerminateOnBaseline(Callback):
     """Callback that terminates training when either acc or val_acc reaches a specified baseline
     """
 
-    def __init__(self, monitor='acc', baseline=0.9):
+    def __init__(self, monitor='acc', baseline=0.99):
         super(TerminateOnBaseline, self).__init__()
         self.monitor = monitor
         self.baseline = baseline
@@ -155,8 +177,7 @@ class AnnEcg200():
         self.test_db_file = test_db_file
         self.im_train_df = None
         self.im_test_df = None
-        self.normalized_train_df = None
-        self.norms_df = None
+        self.norm_object = None
 
     def create_dataframes(self):
         with open(self.train_db_file) as f:
@@ -166,52 +187,47 @@ class AnnEcg200():
         with open(self.train_db_file) as f:
             self.train_df = a2p.load(f)
             # print(self.train_df)
-
-    def normalize_test_dataframe(self):
-        norm_inst = NormalizeFeatures(self.train_df, self.train_df.columns)
-        norm_inst.normalize_dataframe()
-        self.normalized_train_df = norm_inst.get_normalized_df()
-        self.norms_df = norm_inst.get_norms_df()
-        # print(self.normalized_train_df)
-        # print(self.norms_df)
+        self.norm_object = NormalizeFeatures(self.train_df, self.train_df.columns)
 
     def prepare_train_data(self):
-        train_x = []
-        print(self.normalized_train_df.iloc[:,-1])
-        train_y = self.normalized_train_df[self.normalized_train_df[-1]].to_list()
-        # fetuature_df = self.self.normalized_train_df.drop(labels=)
-        for index, row in self.train_df.iterrows():
-            print(row.to_list())
-            # train_x.append(row)
-            # train_y = 
+        self.norm_object.normalize_train_dataframe()
+        normalized_train_df = self.norm_object.get_normalized_train_df()
+        train_y = normalized_train_df[normalized_train_df.columns[-1]].values
+        train_x = normalized_train_df.drop(labels='target@{-1,1}', axis=1).values
+        # print(self.normalized_train_df.iloc[0])
+        # print(train_x[0])
+        # print(train_y)
+        return train_x, train_y
 
     @staticmethod
     def train_model(train_x, train_y, epochs_to_train):
         # overfitCallback = EarlyStopping(monitor='acc', min_delta=0.00001, mode='min', baseline=0.99, patience=3)
-        overfitCallback = TerminateOnBaseline(monitor='acc', baseline=0.99)
+        overfitCallback = TerminateOnBaseline(monitor='acc', baseline=1)
         train_samle_length = len(train_x[0])
         model_fft_input = Input(shape=(train_samle_length,))
-        model_fft_dense_1 = Dense(72, activation='relu')(model_fft_input)
-        model_fft_dense_2 = Dense(36, activation='relu')(model_fft_dense_1)
-        predict_out = Dense(1, activation='softmax')(model_fft_dense_2)
+        model_fft_dense_1 = Dense(96, activation='relu')(model_fft_input)
+        model_fft_dense_2 = Dense(48, activation='relu')(model_fft_dense_1)
+        predict_out = Dense((1), activation='sigmoid')(model_fft_dense_2)
         model_fft = Model(inputs=model_fft_input, outputs=predict_out)
-        model_fft.compile(optimizer=tf.train.AdamOptimizer(),
-                          loss='sparse_categorical_crossentropy',
+        model_fft.compile(optimizer='rmsprop',
+                          loss='binary_crossentropy',
                           metrics=['accuracy'])
         history = model_fft.fit(train_x, train_y, epochs=epochs_to_train, callbacks=[overfitCallback])
         # print(history.history)
         return history, model_fft
 
     def get_model(self):
-        x = np.asarray(self.im_train_df['x'].tolist())
-        y = np.asarray(self.im_train_df['y'].tolist())
-        model = self.train_2model(x, y, 50)
-        return model
+        x, y = self.prepare_train_data()
+        history, model = self.train_model(x, y, 1000)
+        return history, model
 
     def test_model(self, model):
-        x = np.asarray(self.im_test_df['x'].tolist())
-        y = np.asarray(self.im_test_df['y'].tolist())
-        scores = model.evaluate(x, y, verbose=1)
+        normalized_test_df = self.norm_object.normalize_test_dataframe(self.test_df)
+        print(normalized_test_df)
+        test_y = normalized_test_df[normalized_test_df.columns[-1]].values
+        test_x = normalized_test_df.drop(labels='target@{-1,1}', axis=1).values
+        print(type(model))
+        scores = model.evaluate(x=test_x, y=test_y, verbose=1)
         print("%s: %.2f%%" % (model.metrics_names[1], scores[1] * 100))
 
 
@@ -221,8 +237,12 @@ if __name__ == "__main__":
     test_db_folder_name = PurePath(os.getcwd(), 'ecg200_images', 'test')
     ann_inst = AnnEcg200(train_filepath, test_filepath)
     ann_inst.create_dataframes()
-    ann_inst.normalize_test_dataframe()
-    ann_inst.prepare_train_data()
+    # ann_inst.normalize_train_df()
+    # ann_inst.prepare_train_data()
+    history, model = ann_inst.get_model()
+    print(history)
+    ann_inst.test_model(model)
+
 
     '''
     train_db_folder_name = PurePath(os.getcwd(), 'ecg200_images', 'train')

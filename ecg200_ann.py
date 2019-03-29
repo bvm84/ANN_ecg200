@@ -129,16 +129,17 @@ class StandardizeFeatures():
             raise Exception(ZeroDivisionError)
         return standardized_vector, vector_mean, vector_std
 
-    def standardize_dataframe(self):
+    def standardize_train_dataframe(self):
         self._standardized_df = DataFrame()
         self._mean_std_df = DataFrame()
         for col in self._features:
-            standardized_vector, vector_mean, vector_std = self.standardize(self._df[col])
+            standardized_vector, vector_mean, vector_std = self.standardize(pd.to_numeric(self._df[col],
+                                                                                          errors='raise'))
             self._standardized_df.insert(loc=len(self._standardized_df.columns), column=col, value=standardized_vector)
             self._mean_std_df.insert(loc=len(self._mean_std_df.columns), column=col, value=(vector_mean, vector_std))
-            self._mean_std_df.rename(index={0: 'feature_mean', 1: 'feaure_std'}, inplace=True)
+            self._mean_std_df.rename(index={0: 'feature_mean', 1: 'feature_std'}, inplace=True)
 
-    def get_standardized_df(self):
+    def get_standardized_train_df(self):
         if self._standardized_df.empty is False:
             return self._standardized_df
         else:
@@ -149,6 +150,27 @@ class StandardizeFeatures():
             return self._mean_std_df
         else:
             raise Exception('Standardized dataframe is empty')
+
+    def load_mean_std_df(self, mean_std_df):
+        self._mean_std_df = mean_std_df
+
+    def standardize_test_series(self, test_series):
+        standardized_vector_list = []
+        for ind in test_series.index:
+            standardized_value = ((float(test_series[ind]) - self._mean_std_df[ind]['feature_mean']) /
+                                  self._mean_std_df[ind]['feature_std'])
+            standardized_vector_list.append(standardized_value)
+        standardized_test_series = Series(data=standardized_vector_list, index=test_series.index)
+        return standardized_test_series
+
+    def standardize_test_dataframe(self, test_df):
+        standardized_test_df = DataFrame()
+        for index, row in test_df.iterrows():
+            # print(row.index)
+            standardized_series = self.standardize_test_series(row)
+            # print(normalized_series)
+            standardized_test_df = standardized_test_df.append(standardized_series, ignore_index=True)
+        return standardized_test_df
 
 
 class TerminateOnBaseline(Callback):
@@ -178,6 +200,7 @@ class AnnEcg200():
         self.im_train_df = None
         self.im_test_df = None
         self.norm_object = None
+        self.st_object = None
 
     def create_dataframes(self):
         with open(self.train_db_file) as f:
@@ -187,9 +210,9 @@ class AnnEcg200():
         with open(self.train_db_file) as f:
             self.train_df = a2p.load(f)
             # print(self.train_df)
-        self.norm_object = NormalizeFeatures(self.train_df, self.train_df.columns)
 
-    def prepare_train_data(self):
+    def prepare_normalized_train_data(self):
+        self.norm_object = NormalizeFeatures(self.train_df, self.train_df.columns)
         self.norm_object.normalize_train_dataframe()
         normalized_train_df = self.norm_object.get_normalized_train_df()
         train_y = normalized_train_df[normalized_train_df.columns[-1]].values
@@ -199,9 +222,33 @@ class AnnEcg200():
         # print(train_y)
         return train_x, train_y
 
+    def prepare_standardized_train_data(self):
+        features_df = self.train_df.drop(labels='target@{-1,1}', axis=1)
+        self.st_object = StandardizeFeatures(features_df, features_df.columns)
+        self.st_object.standardize_train_dataframe()
+        standardized_train_df = self.st_object.get_standardized_train_df()
+        train_y = self.train_df[self.train_df.columns[-1]].values
+        train_x = standardized_train_df.values
+        # print(self.normalized_train_df.iloc[0])
+        # print(train_x[0])
+        # print(train_y)
+        return train_x, train_y
+
+    '''
+    def prepare_standardized_train_data(self):
+        self.st_object = StandardizeFeatures(self.train_df, self.train_df.columns)
+        self.st_object.standardize_train_dataframe()
+        standardized_train_df = self.st_object.get_standardized_train_df()
+        train_y = standardized_train_df[standardized_train_df.columns[-1]].values
+        train_x = standardized_train_df.drop(labels='target@{-1,1}', axis=1).values
+        # print(self.normalized_train_df.iloc[0])
+        # print(train_x[0])
+        # print(train_y)
+        return train_x, train_y
+    '''
+
     @staticmethod
     def train_model(train_x, train_y, epochs_to_train):
-        # overfitCallback = EarlyStopping(monitor='acc', min_delta=0.00001, mode='min', baseline=0.99, patience=3)
         overfitCallback = TerminateOnBaseline(monitor='acc', baseline=1)
         train_samle_length = len(train_x[0])
         model_fft_input = Input(shape=(train_samle_length,))
@@ -213,22 +260,44 @@ class AnnEcg200():
                           loss='binary_crossentropy',
                           metrics=['accuracy'])
         history = model_fft.fit(train_x, train_y, epochs=epochs_to_train, callbacks=[overfitCallback])
-        # print(history.history)
         return history, model_fft
 
-    def get_model(self):
-        x, y = self.prepare_train_data()
-        history, model = self.train_model(x, y, 1000)
-        return history, model
+    def get_normalized_model(self):
+        x, y = self.prepare_normalized_train_data()
+        _, model = self.train_model(x, y, 1000)
+        return model
 
-    def test_model(self, model):
+    def get_standardized_model(self):
+        x, y = self.prepare_standardized_train_data()
+        _, model = self.train_model(x, y, 1000)
+        return model
+
+    def test_normalized_model(self, model):
         normalized_test_df = self.norm_object.normalize_test_dataframe(self.test_df)
-        print(normalized_test_df)
+        # print(normalized_test_df)
         test_y = normalized_test_df[normalized_test_df.columns[-1]].values
         test_x = normalized_test_df.drop(labels='target@{-1,1}', axis=1).values
-        print(type(model))
+        scores = model.evaluate(x=test_x, y=test_y, verbose=1)
+        return scores
+
+    '''
+    def test_standardized_model(self, model):
+        standardized_test_df = self.st_object.standardize_test_dataframe(self.test_df)
+        # print(standardized_test_df)
+        test_y = standardized_test_df[standardized_test_df.columns[-1]].values
+        test_x = standardized_test_df.drop(labels='target@{-1,1}', axis=1).values
         scores = model.evaluate(x=test_x, y=test_y, verbose=1)
         print("%s: %.2f%%" % (model.metrics_names[1], scores[1] * 100))
+    '''
+
+    def test_standardized_model(self, model):
+        test_fetures_df = self.test_df.drop(labels='target@{-1,1}', axis=1)
+        standardized_test_df = self.st_object.standardize_test_dataframe(test_fetures_df)
+        # print(standardized_test_df)
+        test_y = self.test_df[self.test_df.columns[-1]].values
+        test_x = standardized_test_df.values
+        scores = model.evaluate(x=test_x, y=test_y, verbose=1)
+        return scores
 
 
 if __name__ == "__main__":
@@ -237,30 +306,11 @@ if __name__ == "__main__":
     test_db_folder_name = PurePath(os.getcwd(), 'ecg200_images', 'test')
     ann_inst = AnnEcg200(train_filepath, test_filepath)
     ann_inst.create_dataframes()
-    # ann_inst.normalize_train_df()
-    # ann_inst.prepare_train_data()
-    history, model = ann_inst.get_model()
-    print(history)
-    ann_inst.test_model(model)
-
-
-    '''
-    train_db_folder_name = PurePath(os.getcwd(), 'ecg200_images', 'train')
-    test_db_folder_name = PurePath(os.getcwd(), 'ecg200_images', 'test')
-    inst = ConvPrECG(train_db_folder_name, test_db_folder_name)
-    inst.create_dataframes()
-    inst.normalize_train_dataframe()
-    '''
-    '''
-    data = {'weigth': [1, 2, 0, 0, 0, 0, 1],
-            'Age': [20, 21, 19, 18, 1, 2, 102]}
-    test_dataframe = DataFrame(data)
-    norm_inst = NormalizeFeatures(test_dataframe, test_dataframe.columns)
-    norm_inst.normalize_dataframe()
-    print(norm_inst.get_normalized_df())
-    print(norm_inst.get_norms_df())
-    stand_inst = StandardizeFeatures(test_dataframe, test_dataframe.columns)
-    stand_inst.standardize_dataframe()
-    print(stand_inst.get_standardized_df())
-    print(stand_inst.get_mean_std_df())
-    '''
+    normalized_model = ann_inst.get_normalized_model()
+    normalized_scores = ann_inst.test_normalized_model(normalized_model)
+    standardized_model = ann_inst.get_standardized_model()
+    standardized_scores = ann_inst.test_standardized_model(standardized_model)
+    print("%s: %.2f%%" % (normalized_model.metrics_names[1], normalized_scores[1] * 100))
+    print("%s: %.2f%%" % (standardized_model.metrics_names[1], standardized_scores[1] * 100))
+    # print(ann_inst.st_object.get_standardized_train_df())
+    # print(ann_inst.st_object.standardize_test_dataframe(ann_inst.test_df.drop(labels='target@{-1,1}', axis=1)))

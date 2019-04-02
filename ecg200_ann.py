@@ -449,6 +449,42 @@ class AnnEcg200():
             self.train_df = a2p.load(f)
             # print(self.train_df)
 
+    def preprocess_dataframes(self):
+        new_dataframe = DataFrame()
+        new_series = Series()
+        df = self.train_df.drop(labels='target@{-1,1}', axis=1)
+        for row, series in df.iterrows():
+            # print(series)
+            series = pd.to_numeric(series)
+            series_mean = series.mean()
+            new_series = series.subtract(series_mean)
+            series_max = new_series.max()
+            new_series = new_series.divide(series_max)
+            # print(new_series)
+            new_dataframe = new_dataframe.append(new_series, ignore_index=False)
+        new_dataframe = new_dataframe.reindex(df.columns, axis='columns')
+        new_dataframe.insert(loc=len(new_dataframe.columns),
+                             column='target@{-1,1}', value=self.train_df['target@{-1,1}'].values)
+        # print(new_dataframe)
+        self.train_df = new_dataframe
+        print(self.train_df)
+        # print(self.train_df)
+        new_dataframe = new_dataframe.iloc[0:0]
+        # print(new_dataframe)
+        # print(self.train_df)
+        for row, series in self.test_df.iterrows():
+            series = pd.to_numeric(series)
+            series_mean = series.mean()
+            new_series = series.subtract(series_mean)
+            series_max = new_series.max()
+            new_series = new_series.divide(series_max)
+            new_dataframe = new_dataframe.append(new_series, ignore_index=False)
+        new_dataframe = new_dataframe.reindex(df.columns, axis='columns')
+        new_dataframe.insert(loc=len(new_dataframe.columns),
+                             column='target@{-1,1}', value=self.test_df['target@{-1,1}'])
+        self.test_df = new_dataframe
+        print(self.test_df)
+
     def prepare_normalized_train_data(self):
         self.norm_object = NormalizeFeatures(self.train_df, self.train_df.columns)
         self.norm_object.normalize_train_dataframe()
@@ -491,16 +527,17 @@ class AnnEcg200():
     def train_model(train_x, train_y, epochs_to_train):
         overfitCallback = TerminateOnBaseline(monitor='acc', baseline=1)
         train_samle_length = len(train_x[0])
-        model_fft_input = Input(shape=(train_samle_length,))
-        model_fft_dense_1 = Dense(96, activation='relu')(model_fft_input)
-        model_fft_dense_2 = Dense(48, activation='relu')(model_fft_dense_1)
-        predict_out = Dense((1), activation='hard_sigmoid')(model_fft_dense_2)
-        model_fft = Model(inputs=model_fft_input, outputs=predict_out)
-        model_fft.compile(optimizer='rmsprop',
-                          loss='binary_crossentropy',
-                          metrics=['accuracy'])
-        history = model_fft.fit(train_x, train_y, epochs=epochs_to_train, callbacks=[overfitCallback])
-        return history, model_fft
+        model_input = Input(shape=(train_samle_length,))
+        model_dense_1 = Dense(96, activation='relu')(model_input)
+        model_dropout_1 = Dropout(rate=0.5)(model_dense_1)
+        model_dense_2 = Dense(48, activation='relu')(model_dropout_1)
+        predict_out = Dense((1), activation='hard_sigmoid')(model_dense_2)
+        model = Model(inputs=model_input, outputs=predict_out)
+        model.compile(optimizer='rmsprop',
+                      loss='binary_crossentropy',
+                      metrics=['accuracy'])
+        history = model.fit(train_x, train_y, epochs=epochs_to_train)
+        return history, model
 
     def get_normalized_model(self):
         x, y = self.prepare_normalized_train_data()
@@ -589,9 +626,14 @@ if __name__ == "__main__":
     test_db_folder_name = PurePath(os.getcwd(), 'ecg200_images', 'test')
     ann_inst = AnnEcg200(train_filepath, test_filepath)
     ann_inst.create_dataframes()
+    # ann_inst.preprocess_dataframes()
     normalized_model = ann_inst.get_normalized_model()
     norm_train_df = ann_inst.norm_object.get_normalized_train_df()
     normalized_scores = ann_inst.test_normalized_model(normalized_model)
+    print(ann_inst.norm_object.get_normalized_train_df())
+    print(ann_inst.norm_object.normalize_test_dataframe(ann_inst.test_df))
+    print("%s: %.2f%%" % (normalized_model.metrics_names[1], normalized_scores[1] * 100))
+    '''
     standardized_model = ann_inst.get_standardized_model()
     standardized_scores = ann_inst.test_standardized_model(standardized_model)
     stn_model = ann_inst.get_stn_model()
@@ -605,3 +647,4 @@ if __name__ == "__main__":
     print("%s: %.2f%%" % (nst_model.metrics_names[1], nst_scores[1] * 100))
     # print(ann_inst.st_object.get_standardized_train_df())
     # print(ann_inst.st_object.standardize_test_dataframe(ann_inst.test_df.drop(labels='target@{-1,1}', axis=1)))
+    '''

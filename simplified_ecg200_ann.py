@@ -2,7 +2,7 @@ import os
 from pathlib import PurePath
 import matplotlib.pyplot as plt
 from pandas import DataFrame, Series
-from keras.layers import Dense, Input, Dropout
+from keras.layers import Dense, Input
 from keras.models import Model
 from keras.callbacks import Callback
 from arff2pandas import a2p
@@ -38,8 +38,8 @@ class AnnEcg200():
         self.test_df_y = None
         self.train_df_xs = None
         self.train_df_ys = None
-        # self.test_df_xs = DataFrame()
-        # self.test_df_ys = DataFrame()ne
+        self.test_df_xs = None
+        self.test_df_ys = None
         self.xscale_object = None
         self.yscale_object = None
 
@@ -71,26 +71,37 @@ class AnnEcg200():
         self.xscale_object = preprocessing.MinMaxScaler(feature_range=(0, 1), copy=True)
         self.yscale_object = preprocessing.MinMaxScaler(feature_range=(0, 1), copy=True)
         # scale x data
-        self.train_df_xs = self.train_df_x
-        self.train_df_xs[self.train_df_x.columns] = self.xscale_object.fit_transform(self.train_df_x[self.train_df_x.columns])
-        self.test_df_xs = self.test_df_x
-        self.test_df_xs[self.test_df_x.columns] = self.xscale_object.transform(self.test_df_x[self.test_df_x.columns])
+        self.train_df_xs = self.train_df_x.copy(deep=True)
+        self.train_df_xs[self.train_df_xs.columns] = (
+            self.xscale_object.fit_transform(self.train_df_xs[self.train_df_xs.columns])
+        )
+        self.test_df_xs = self.test_df_x.copy(deep=True)
+        self.test_df_xs[self.test_df_xs.columns] = (
+            self.xscale_object.transform(self.test_df_xs[self.test_df_xs.columns])
+        )
         # scale y data
-        self.train_df_ys = Series(self.yscale_object.fit_transform(self.train_df_y.values.reshape(-1, 1))[:, 0])
-        self.test_df_ys = Series(self.yscale_object.transform(self.test_df_y.values.reshape(-1, 1))[:, 0])
-        return self.train_df_xs.values.astype(dtype='float64'), self.train_df_ys.values.astype(dtype='float64')
+        self.train_df_ys = Series(
+            self.yscale_object.fit_transform(self.train_df_y.copy(deep=True).values.reshape(-1, 1))[:, 0])
+        self.test_df_ys = Series(
+            self.yscale_object.transform(self.test_df_y.copy(deep=True).values.reshape(-1, 1))[:, 0])
 
     def prepare_standardized_data(self):
         self.xscale_object = preprocessing.StandardScaler(copy=True, with_mean=True, with_std=True)
         self.yscale_object = preprocessing.MinMaxScaler(feature_range=(0, 1), copy=True)
         # scale x data
-        self.train_df_xs = self.train_df_x
-        self.train_df_xs[self.train_df_x.columns] = self.xscale_object.fit_transform(self.train_df_x[self.train_df_x.columns])
-        self.test_df_xs = self.test_df_x
-        self.test_df_xs[self.test_df_x.columns] = self.xscale_object.transform(self.test_df_x[self.test_df_x.columns])
+        self.train_df_xs = self.train_df_x.copy(deep=True)
+        self.train_df_xs[self.train_df_xs.columns] = (
+            self.xscale_object.fit_transform(self.train_df_xs[self.train_df_xs.columns])
+        )
+        self.test_df_xs = self.test_df_x.copy(deep=True)
+        self.test_df_xs[self.test_df_xs.columns] = (
+            self.xscale_object.transform(self.test_df_xs[self.test_df_xs.columns])
+        )
         # scale y data
-        self.train_df_ys = Series(self.yscale_object.fit_transform(self.train_df_y.values.reshape(-1, 1))[:, 0])
-        self.test_df_ys = Series(self.yscale_object.transform(self.test_df_y.values.reshape(-1, 1))[:, 0])
+        self.train_df_ys = Series(
+            self.yscale_object.fit_transform(self.train_df_y.copy(deep=True).values.reshape(-1, 1))[:, 0])
+        self.test_df_ys = Series(
+            self.yscale_object.transform(self.test_df_y.copy(deep=True).values.reshape(-1, 1))[:, 0])
 
     @staticmethod
     def train_model(train_x, train_y, epochs_to_train):
@@ -122,17 +133,9 @@ class AnnEcg200():
         return scores
 
     def show_features_distribution(self, feature):
-        fig, axs = plt.subplots(1, 5, sharey=True, tight_layout=True)
-        axs[0].hist(pd.to_numeric(self.train_df[feature]).values, bins='auto')
-        axs[1].hist(self.norm_object.get_normalized_train_df()[feature].values, bins='auto')
-        axs[2].hist(self.st_object.get_standardized_train_df()[feature].values, bins='auto')
-        axs[3].hist(self.stn_object.get_stn_train_df()[feature].values, bins='auto')
-        axs[4].hist(self.nst_object.get_nst_train_df()[feature].values, bins='auto')
-        print(pd.to_numeric(self.train_df[feature]).values)
-        print(self.norm_object.get_normalized_train_df()[feature].values)
-        print(self.st_object.get_standardized_train_df()[feature].values)
-        print(self.stn_object.get_stn_train_df()[feature].values)
-        print(self.nst_object.get_nst_train_df()[feature].values)
+        fig, axs = plt.subplots(1, 2, sharey=True, tight_layout=True)
+        axs[0].hist(pd.to_numeric(self.train_df_x[feature]).values, bins='auto')
+        axs[1].hist(pd.to_numeric(self.train_df_xs[feature]).values, bins='auto')
         plt.title("Histograms with 'auto' bins")
         plt.show()
 
@@ -141,8 +144,8 @@ if __name__ == "__main__":
     train_filepath = PurePath(os.getcwd(), 'ECG200', 'ECG200_TRAIN.arff')
     test_filepath = PurePath(os.getcwd(), 'ECG200', 'ECG200_TEST.arff')
     ann_inst = AnnEcg200(train_filepath, test_filepath)
-    # ann_inst.prepare_normalized_data()
-    ann_inst.prepare_standardized_data()
+    ann_inst.prepare_normalized_data()
+    #ann_inst.prepare_standardized_data()
     model = ann_inst.get_model()
     scores = ann_inst.test_model(model)
     # print(ann_inst.norm_object.get_normalized_train_df())
@@ -151,5 +154,7 @@ if __name__ == "__main__":
     print(ann_inst.test_df_xs)
     # print(ann_inst.train_df_x['att1@NUMERIC'].std())
     print(ann_inst.train_df_ys)
+    print(ann_inst.test_df_ys)
     print(ann_inst.train_df_x['att1@NUMERIC'].max())
     print("%s: %.2f%%" % (model.metrics_names[1], scores[1] * 100))
+    ann_inst.show_features_distribution(ann_inst.train_df_x.columns[0])

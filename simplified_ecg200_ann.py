@@ -55,17 +55,26 @@ class AnnEcg200():
             self.train_df_y = self.train_df[self.train_df.columns[-1]]
             # print(self.train_df)
 
-    def normalize_dataframe_rows(self, df):
+    @staticmethod
+    def normalize_dataframe_rows(df):
         row_normalized_dataframe = DataFrame()
         for row, series in df.iterrows():
             # print(series)
             series = pd.to_numeric(series)
+            '''
+            series = series.subtract(series.mean())
+            series = series.divide(series.max())
+            '''
             series = series.subtract(series.min())
             series = series.divide(series.max() - series.min())
             # print(new_series)
             row_normalized_dataframe = row_normalized_dataframe.append(series, ignore_index=False)
         row_normalized_dataframe = row_normalized_dataframe.reindex(df.columns, axis='columns')
         return row_normalized_dataframe
+
+    def normalize_train_test_rows(self):
+        self.train_df_x = self.normalize_dataframe_rows(self.train_df_x)
+        self.test_df_x = self.normalize_dataframe_rows(self.test_df_x)
 
     def prepare_normalized_data(self):
         self.xscale_object = preprocessing.MinMaxScaler(feature_range=(0, 1), copy=True)
@@ -139,13 +148,21 @@ class AnnEcg200():
         plt.title("Histograms with 'auto' bins")
         plt.show()
 
+    def show_waveforms(self, row_number):
+        fig, axs = plt.subplots(1, 2, sharey=True, tight_layout=True)
+        axs[0].plot(pd.to_numeric(self.train_df_x.loc[row_number]).values)
+        axs[1].plot(pd.to_numeric(self.train_df_xs.loc[row_number]).values)
+        plt.title("Wavafoems")
+        plt.show()
+
 
 if __name__ == "__main__":
     train_filepath = PurePath(os.getcwd(), 'ECG200', 'ECG200_TRAIN.arff')
     test_filepath = PurePath(os.getcwd(), 'ECG200', 'ECG200_TEST.arff')
     ann_inst = AnnEcg200(train_filepath, test_filepath)
-    ann_inst.prepare_normalized_data()
-    #ann_inst.prepare_standardized_data()
+    ann_inst.normalize_train_test_rows()
+    # ann_inst.prepare_normalized_data()
+    ann_inst.prepare_standardized_data()
     model = ann_inst.get_model()
     scores = ann_inst.test_model(model)
     # print(ann_inst.norm_object.get_normalized_train_df())
@@ -157,4 +174,5 @@ if __name__ == "__main__":
     print(ann_inst.test_df_ys)
     print(ann_inst.train_df_x['att1@NUMERIC'].max())
     print("%s: %.2f%%" % (model.metrics_names[1], scores[1] * 100))
-    ann_inst.show_features_distribution(ann_inst.train_df_x.columns[0])
+    # ann_inst.show_features_distribution(ann_inst.train_df_x.columns[0])
+    ann_inst.show_waveforms(0)

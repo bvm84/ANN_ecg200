@@ -8,6 +8,7 @@ from keras.callbacks import Callback
 from arff2pandas import a2p
 from sklearn import preprocessing
 import pandas as pd
+import numpy as np
 
 
 class TerminateOnBaseline(Callback):
@@ -141,6 +142,22 @@ class AnnEcg200():
         scores = model.evaluate(x=test_x, y=test_y, verbose=1)
         return scores
 
+    @staticmethod
+    def predict_model(model, array):
+        predicted = model.predict(np.expand_dims(array, axis=0))
+        return np.round(np.squeeze(predicted))
+
+    def test_model_loop(self, model):
+        predicted_list = []
+        for i in range(self.test_df_xs.shape[0]):
+            # print(self.test_df_xs.loc[i].values)
+            result = self.predict_model(model, self.test_df_xs.loc[i].values)
+            predicted_list.append(result)
+        d = {'predicted': predicted_list, 'anoted': self.test_df_ys.values}
+        result_df = DataFrame(data=d)
+        result_df.to_excel("output.xlsx")
+        print(result_df)
+
     def show_features_distribution(self, feature):
         fig, axs = plt.subplots(1, 2, sharey=True, tight_layout=True)
         axs[0].hist(pd.to_numeric(self.train_df_x[feature]).values, bins='auto')
@@ -167,12 +184,13 @@ if __name__ == "__main__":
     scores = ann_inst.test_model(model)
     # print(ann_inst.norm_object.get_normalized_train_df())
     # print(ann_inst.norm_object.normalize_test_dataframe(ann_inst.test_df))
-    print(ann_inst.train_df_xs)
-    print(ann_inst.test_df_xs)
+    # print(ann_inst.train_df_xs)
+    # print(ann_inst.test_df_xs)
     # print(ann_inst.train_df_x['att1@NUMERIC'].std())
-    print(ann_inst.train_df_ys)
-    print(ann_inst.test_df_ys)
-    print(ann_inst.train_df_x['att1@NUMERIC'].max())
+    # print(ann_inst.train_df_ys)
+    # print(ann_inst.test_df_ys)
+    # print(ann_inst.train_df_x['att1@NUMERIC'].max())
     print("%s: %.2f%%" % (model.metrics_names[1], scores[1] * 100))
     # ann_inst.show_features_distribution(ann_inst.train_df_x.columns[0])
-    ann_inst.show_waveforms(0)
+    # ann_inst.show_waveforms(0)
+    ann_inst.test_model_loop(model)
